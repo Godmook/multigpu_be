@@ -4,6 +4,9 @@ from app.services.gpu_parser import GPUParser
 from app.models.node import NodeInfo, GPUInfo
 from app.config import KUBECONFIG
 
+TEAM_ANNOT_KEY = "example.com/team"
+MEMBER_ANNOT_KEY = "example.com/member"
+
 router = APIRouter()
 
 @router.get("/", response_model=dict)
@@ -29,6 +32,8 @@ def get_nodes():
             physical_gpu_count = 0
         gpu_usage = [{} for _ in range(physical_gpu_count)]
         pod_map = [[] for _ in range(physical_gpu_count)]
+        user_map = [[] for _ in range(physical_gpu_count)]
+        team_map = [[] for _ in range(physical_gpu_count)]
         for pod in pods:
             if pod.spec.node_name != name:
                 continue
@@ -37,9 +42,15 @@ def get_nodes():
                 ann.get('hami.io/vgpu-devices-allocated', ''),
                 physical_gpu_count
             )
+            team = ann.get(TEAM_ANNOT_KEY, "")
+            member = ann.get(MEMBER_ANNOT_KEY, "")
             for idx, g in enumerate(vgpu_info):
                 if g['uuid']:
                     pod_map[idx].append(pod.metadata.name)
+                    if member:
+                        user_map[idx].append(member)
+                    if team:
+                        team_map[idx].append(team)
                     gpu_usage[idx] = g
         gpus = []
         for idx in range(physical_gpu_count):
@@ -50,7 +61,9 @@ def get_nodes():
                 unique_id=g["uuid"],
                 allocation=g["allocation"],
                 source="pod_annotation" if g["uuid"] else "node_status",
-                pods=pod_map[idx]
+                pods=pod_map[idx],
+                user_names=user_map[idx],
+                team_names=team_map[idx]
             ))
         node_info = NodeInfo(
             name=name,
@@ -82,15 +95,23 @@ def get_node_gpus(node_name: str):
     pods = k8s.list_gpu_job_pods(node_name=node_name).items
     gpu_usage = [{} for _ in range(physical_gpu_count)]
     pod_map = [[] for _ in range(physical_gpu_count)]
+    user_map = [[] for _ in range(physical_gpu_count)]
+    team_map = [[] for _ in range(physical_gpu_count)]
     for pod in pods:
         ann = pod.metadata.annotations or {}
         vgpu_info = GPUParser.parse_vgpu_devices_allocated(
             ann.get('hami.io/vgpu-devices-allocated', ''),
             physical_gpu_count
         )
+        team = ann.get(TEAM_ANNOT_KEY, "")
+        member = ann.get(MEMBER_ANNOT_KEY, "")
         for idx, g in enumerate(vgpu_info):
             if g['uuid']:
                 pod_map[idx].append(pod.metadata.name)
+                if member:
+                    user_map[idx].append(member)
+                if team:
+                    team_map[idx].append(team)
                 gpu_usage[idx] = g
     gpus = []
     for idx in range(physical_gpu_count):
@@ -101,7 +122,9 @@ def get_node_gpus(node_name: str):
             unique_id=g["uuid"],
             allocation=g["allocation"],
             source="pod_annotation" if g["uuid"] else "node_status",
-            pods=pod_map[idx]
+            pods=pod_map[idx],
+            user_names=user_map[idx],
+            team_names=team_map[idx]
         ))
     return {
         "node": node_name,
@@ -125,11 +148,15 @@ def get_gpu_pods(node_name: str, gpu_uuid: str):
         ann = pod.metadata.annotations or {}
         vgpu_info = GPUParser.parse_vgpu_devices_allocated(
             ann.get('hami.io/vgpu-devices-allocated', ''), 0)
+        team = ann.get(TEAM_ANNOT_KEY, "")
+        member = ann.get(MEMBER_ANNOT_KEY, "")
         for g in vgpu_info:
             if g['uuid'] == gpu_uuid:
                 result.append({
                     "pod_name": pod.metadata.name,
                     "namespace": pod.metadata.namespace,
                     "allocation": g['allocation'],
+                    "user_name": member,
+                    "team_name": team,
                 })
     return {"node": node_name, "gpu_uuid": gpu_uuid, "pods": result}
