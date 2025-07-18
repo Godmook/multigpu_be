@@ -150,40 +150,43 @@ class JobManager:
     def submit_native_job(self, job_manifest: dict) -> str:
         """
         K8s native Job manifest를 그대로 받아서 생성
+        이름이 중복되면 타임스탬프+랜덤값을 붙여 유니크하게 자동 변경
         """
         name = job_manifest.get("metadata", {}).get("name", "unknown")
         namespace = job_manifest.get("metadata", {}).get("namespace", "default")
 
+        # 이름 중복 체크 및 유니크 이름 생성
+        try:
+            self.k8s.batch_v1.read_namespaced_job(name=name, namespace=namespace)
+            # 이미 존재하면 유니크 이름으로 변경
+            now = datetime.now(timezone.utc)
+            unique_name = f"{name}-{now.strftime('%Y%m%d%H%M%S')}-{random.randint(1000,9999)}"
+            job_manifest["metadata"]["name"] = unique_name
+            name = unique_name
+        except Exception:
+            # 존재하지 않으면 그대로 진행
+            pass
+
         meta = job_manifest.setdefault("metadata", {})
         labels = meta.setdefault("labels", {})
         annotations = meta.setdefault("annotations", {})
-
-        # PodTemplate metadata.labels/annotations
         pod_template = job_manifest.get("spec", {}).get("template", {})
         pod_meta = pod_template.setdefault("metadata", {})
         pod_labels = pod_meta.setdefault("labels", {})
         pod_annotations = pod_meta.setdefault("annotations", {})
-
-        # gang id (pod-group-name) 추출
         gang_id = labels.get("kueue.x-k8s.io/pod-group-name")
-        # gang count (pod-group-total-count) 추출
         gang_count = (
             annotations.get("kueue.x-k8s.io/pod-group-total-count")
             or meta.get("pod_group_total")
             or meta.get("gang_count")
         )
-
-        # gang id가 있으면 label에 반드시 추가 (Job + PodTemplate)
         if gang_id:
             labels["kueue.x-k8s.io/pod-group-name"] = gang_id
             pod_labels["kueue.x-k8s.io/pod-group-name"] = gang_id
-        # gang count가 있으면 annotation에 반드시 추가 (Job + PodTemplate)
         if gang_id and gang_count:
             annotations["kueue.x-k8s.io/pod-group-total-count"] = str(gang_count)
             pod_annotations["kueue.x-k8s.io/pod-group-total-count"] = str(gang_count)
-
         job_obj = client.ApiClient()._ApiClient__deserialize(job_manifest, "V1Job")
-
         try:
             self.k8s.batch_v1.create_namespaced_job(namespace=namespace, body=job_obj)
             logger.info("Job %s created", name)
@@ -192,7 +195,6 @@ class JobManager:
                 raise Exception("Job already exists")
             logger.error("K8s error: %s", e.body)
             raise Exception("Kubernetes API error")
-
         return name
 
     def delete_job(self, job_id: str, namespace: str = "default") -> bool:

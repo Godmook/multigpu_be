@@ -23,6 +23,22 @@ class K8SClient:
             return self.core_v1.list_pod_for_all_namespaces(field_selector=f'spec.nodeName={node_name}')
         return self.core_v1.list_pod_for_all_namespaces()
 
+    def list_gpu_job_pods(self, node_name: str = None) -> Any:
+        """
+        drf.scheduler/gpu-job=true 라벨이 붙은 Running Pod만 조회
+        """
+        field_selector = "status.phase=Running"
+        label_selector = "drf.scheduler/gpu-job=true"
+        if node_name:
+            return self.core_v1.list_pod_for_all_namespaces(
+                field_selector=f"spec.nodeName={node_name},{field_selector}",
+                label_selector=label_selector
+            )
+        return self.core_v1.list_pod_for_all_namespaces(
+            field_selector=field_selector,
+            label_selector=label_selector
+        )
+
     def list_jobs(self) -> Any:
         """모든 Job 목록 조회"""
         return self.batch_v1.list_job_for_all_namespaces()
