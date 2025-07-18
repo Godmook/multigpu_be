@@ -232,31 +232,37 @@ class JobManager:
                 ))
         return pending
 
-    def get_pending_workloads(self) -> list:
-        """Kueue에서 pending 상태의 Workload 목록 조회"""
+    def get_pending_workloads(self) -> dict:
+        """
+        Kueue에서 pending 상태의 Workload 목록을 priority 내림차순, queue name별로 그룹핑해서 반환
+        user_name, team_name은 example.com/member, example.com/team에서 추출
+        """
         workloads_data = self.k8s.list_workloads()
-        workloads = []
-        
+        grouped = {}
         for wl_data in workloads_data:
-            # annotation에서 사용자/팀 정보 추출
             annotations = wl_data.get('annotations', {})
-            user_name = annotations.get('user_name', '')
-            team_name = annotations.get('team_name', '')
-            
+            labels = wl_data.get('labels', {})
+            user_name = annotations.get('example.com/member', '')
+            team_name = annotations.get('example.com/team', '')
+            queue_name = labels.get('kueue.x-k8s.io/queue-name', '')
             workload = WorkloadInfo(
                 name=wl_data['name'],
                 namespace=wl_data['namespace'],
                 priority=wl_data['priority'],
                 created_at=wl_data['created_at'],
                 resource_requests=wl_data['resource_requests'],
-                labels=wl_data.get('labels'),
+                labels=labels,
                 annotations=annotations,
                 user_name=user_name,
                 team_name=team_name
             )
-            workloads.append(workload)
-        
-        return workloads
+            if queue_name not in grouped:
+                grouped[queue_name] = []
+            grouped[queue_name].append(workload)
+        # 각 queue별로 priority 내림차순 정렬
+        for queue in grouped:
+            grouped[queue].sort(key=lambda w: w.priority, reverse=True)
+        return grouped
 
     def update_priority(self, job_id: str, priority: str) -> bool:
         """Job 우선순위 변경 (label patch)"""

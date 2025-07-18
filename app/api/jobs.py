@@ -45,43 +45,13 @@ def get_pending_jobs():
 @router.get("/pending-workloads/", response_model=dict)
 def get_pending_workloads():
     """
-    Kueue에서 pending 상태의 Workload 목록 조회
-    
-    Kueue Workloads에서 admission이 None인 pending 상태의 Workload들을 조회합니다.
-    
-    **반환 데이터:**
-    - `pending_workloads`: 대기중인 Workload 목록
-        - `name`: Workload 이름
-        - `namespace`: 네임스페이스
-        - `priority`: 우선순위 (숫자)
-        - `created_at`: 생성시간
-        - `resource_requests`: 리소스 요구량
-        - `user_name`: 사용자 이름
-        - `team_name`: 팀 이름
-        - `labels`: 라벨
-        - `annotations`: 어노테이션
-    
-    **예시 응답:**
-    ```json
-    {
-      "pending_workloads": [
-        {
-          "name": "ml-training-workload",
-          "namespace": "default",
-          "priority": 100,
-          "created_at": "2024-01-15T10:30:00Z",
-          "resource_requests": {
-            "example.com/gpu": "2"
-          },
-          "user_name": "alice",
-          "team_name": "ml-team"
-        }
-      ]
-    }
-    ```
+    Kueue에서 pending 상태의 Workload를 priority 내림차순, queue name별로 그룹핑해서 반환
+    user_name, team_name은 example.com/member, example.com/team에서 추출
     """
     jm = JobManager()
-    return {"pending_workloads": [w.dict() for w in jm.get_pending_workloads()]}
+    grouped = jm.get_pending_workloads()
+    # queue별로 priority 내림차순 리스트 반환
+    return {"pending_workloads": {q: [w.dict() for w in ws] for q, ws in grouped.items()}}
 
 @router.patch("/{job_id}/priority/", response_model=dict)
 def update_job_priority(job_id: str, priority: str):
