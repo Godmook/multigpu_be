@@ -235,18 +235,14 @@ class JobManager:
     def get_pending_workloads(self) -> dict:
         """
         Kueue에서 pending 상태의 Workload 목록을 priority 내림차순, queue name별로 그룹핑해서 반환
-        user_name, team_name, gpu_type은 spec.podSets[0].template.metadata.annotations에서 추출
+        user_name, team_name, gpu_type은 podSets[0].template.metadata.annotations에서 추출
         """
         workloads_data = self.k8s.list_workloads()
         grouped = {}
         for wl_data in workloads_data:
             labels = wl_data.get('labels', {})
             queue_name = labels.get('kueue.x-k8s.io/queue-name', '')
-            # podSets[0].template.metadata.annotations에서 추출
-            podsets = wl_data.get('spec', {}).get('podSets', [])
-            pod_ann = {}
-            if podsets and 'template' in podsets[0]:
-                pod_ann = podsets[0]['template'].get('metadata', {}).get('annotations', {})
+            pod_ann = wl_data.get('annotations', {})
             user_name = pod_ann.get('example.com/member', '')
             team_name = pod_ann.get('example.com/team', '')
             gpu_type = pod_ann.get('nvidia.com/use-gputype', '')

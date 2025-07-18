@@ -149,30 +149,31 @@ class K8SClient:
             }
 
     def list_workloads(self) -> List[Dict]:
-        """Kueue Workloads 조회 (pending 상태의 Workload만)"""
+        """
+        Kueue Workloads 조회 (pending 상태의 Workload만)
+        podSets[0].template.metadata.annotations, labels 등도 함께 반환
+        """
         try:
-            # Kueue Workload API 호출
             workloads = self.custom_api.list_cluster_custom_object(
                 group="kueue.x-k8s.io",
                 version="v1beta1",
                 plural="workloads"
             )
-            
             pending_workloads = []
             for workload in workloads.get('items', []):
-                # pending 상태인 Workload만 필터링
                 status = workload.get('status', {})
-                if status.get('admission') is None:  # admit되지 않은 상태
+                if status.get('admission') is None:
                     metadata = workload.get('metadata', {})
                     spec = workload.get('spec', {})
-                    
-                    # 우선순위 추출 (priority 필드에서 숫자로)
+                    labels = metadata.get('labels', {})
+                    # podSets[0].template.metadata.annotations, labels
+                    podsets = spec.get('podSets', [])
+                    pod_ann = {}
+                    if podsets and 'template' in podsets[0]:
+                        pod_ann = podsets[0]['template'].get('metadata', {}).get('annotations', {})
+                    # 우선순위, 생성시간, 리소스 요구량 등 기존 필드
                     priority = spec.get('priority', 0)
-                    
-                    # 생성시간 추출
                     creation_timestamp = metadata.get('creationTimestamp', '')
-                    
-                    # 리소스 요구량 추출
                     resource_requests = {}
                     for pod_set in spec.get('podSets', []):
                         for container in pod_set.get('template', {}).get('spec', {}).get('containers', []):
@@ -180,19 +181,17 @@ class K8SClient:
                             for resource, amount in requests.items():
                                 if resource.startswith(f'{GPU_RESOURCE_PREFIX}/'):
                                     resource_requests[resource] = amount
-                    
                     pending_workloads.append({
                         'name': metadata.get('name', ''),
                         'namespace': metadata.get('namespace', ''),
                         'priority': priority,
                         'created_at': creation_timestamp,
                         'resource_requests': resource_requests,
-                        'labels': metadata.get('labels', {}),
-                        'annotations': metadata.get('annotations', {})
+                        'labels': labels,
+                        'annotations': pod_ann,
+                        'spec': spec
                     })
-            
             return pending_workloads
-            
         except Exception as e:
             print(f"Error fetching workloads: {e}")
             return []
