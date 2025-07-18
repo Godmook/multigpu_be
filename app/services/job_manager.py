@@ -235,16 +235,21 @@ class JobManager:
     def get_pending_workloads(self) -> dict:
         """
         Kueue에서 pending 상태의 Workload 목록을 priority 내림차순, queue name별로 그룹핑해서 반환
-        user_name, team_name은 example.com/member, example.com/team에서 추출
+        user_name, team_name, gpu_type은 spec.podSets[0].template.metadata.annotations에서 추출
         """
         workloads_data = self.k8s.list_workloads()
         grouped = {}
         for wl_data in workloads_data:
-            annotations = wl_data.get('annotations', {})
             labels = wl_data.get('labels', {})
-            user_name = annotations.get('example.com/member', '')
-            team_name = annotations.get('example.com/team', '')
             queue_name = labels.get('kueue.x-k8s.io/queue-name', '')
+            # podSets[0].template.metadata.annotations에서 추출
+            podsets = wl_data.get('spec', {}).get('podSets', [])
+            pod_ann = {}
+            if podsets and 'template' in podsets[0]:
+                pod_ann = podsets[0]['template'].get('metadata', {}).get('annotations', {})
+            user_name = pod_ann.get('example.com/member', '')
+            team_name = pod_ann.get('example.com/team', '')
+            gpu_type = pod_ann.get('nvidia.com/use-gputype', '')
             workload = WorkloadInfo(
                 name=wl_data['name'],
                 namespace=wl_data['namespace'],
@@ -252,14 +257,14 @@ class JobManager:
                 created_at=wl_data['created_at'],
                 resource_requests=wl_data['resource_requests'],
                 labels=labels,
-                annotations=annotations,
+                annotations=pod_ann,
                 user_name=user_name,
-                team_name=team_name
+                team_name=team_name,
+                gpu_type=gpu_type
             )
             if queue_name not in grouped:
                 grouped[queue_name] = []
             grouped[queue_name].append(workload)
-        # 각 queue별로 priority 내림차순 정렬
         for queue in grouped:
             grouped[queue].sort(key=lambda w: w.priority, reverse=True)
         return grouped
