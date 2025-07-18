@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+kubernetes
+pydantic
+python-dotenv
+
+
