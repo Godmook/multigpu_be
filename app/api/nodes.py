@@ -12,16 +12,20 @@ def get_nodes():
     모든 노드 및 GPU 정보 조회
     
     violet-그래픽카드이름-001~0xx 패턴에 맞는 노드만 필터링하여 반환합니다.
+    hami.io annotation이 없어도 노드 상태에서 GPU 정보를 종합적으로 조회합니다.
     
     **반환 데이터:**
     - `nodes`: 노드 목록
         - `name`: 노드 이름 (예: violet-h100-023)
         - `gpu_type`: GPU 타입 (예: H100, A100)
+        - `gpu_count`: GPU 개수
+        - `status`: 노드 상태 (Active, Available, Error)
         - `gpus`: GPU 정보 목록
             - `uuid`: GPU UUID
             - `nvidia`: GPU 타입
             - `unique_id`: 고유 ID
             - `allocation`: 할당률 (1~100)
+            - `source`: 정보 출처 (hami.io, node_status)
             - `pods`: 해당 GPU를 사용하는 Pod 목록
             - `user_names`: 사용자 이름 목록
             - `team_names`: 팀 이름 목록
@@ -33,12 +37,15 @@ def get_nodes():
         {
           "name": "violet-h100-023",
           "gpu_type": "H100",
+          "gpu_count": 8,
+          "status": "Active",
           "gpus": [
             {
               "uuid": "GPU-UUID-123",
               "nvidia": "H100",
               "unique_id": "GPU-UUID-123",
               "allocation": 80,
+              "source": "hami.io",
               "pods": ["pod-1", "pod-2"],
               "user_names": ["alice", "bob"],
               "team_names": ["ml-team", "ai-team"]
@@ -52,18 +59,45 @@ def get_nodes():
     k8s = K8SClient(KUBECONFIG)
     nodes = k8s.list_nodes().items
     result = []
+    
     for node in nodes:
         name = node.metadata.name
         # violet-그래픽카드이름-001~0xx 패턴에 맞는 노드만 필터링
         if not GPUParser.is_valid_node_name(name):
             continue
-        gpu_type = GPUParser.parse_node_name(name)
-        # annotation에서 vgpu 정보 파싱
-        ann = node.metadata.annotations or {}
-        vgpu_info = GPUParser.parse_vgpu_devices_allocated(ann.get('hami.io/vgpu-devices-allocated', ''))
-        gpus = [GPUInfo(uuid=g['uuid'], nvidia=gpu_type, unique_id=g['uuid'], allocation=g['allocation']) for g in vgpu_info]
-        result.append(NodeInfo(name=name, gpu_type=gpu_type, gpus=gpus))
-    return {"nodes": [n.dict() for n in result]}
+            
+        # 종합적인 GPU 정보 조회
+        gpu_info = k8s.get_node_gpu_info(name)
+        
+        # GPU 상세 정보를 GPUInfo 모델로 변환
+        gpus = []
+        for gpu_detail in gpu_info['gpu_details']:
+            gpu = GPUInfo(
+                uuid=gpu_detail['uuid'],
+                nvidia=gpu_info['gpu_type'],
+                unique_id=gpu_detail['uuid'],
+                allocation=gpu_detail['allocation'],
+                source=gpu_detail['source']
+            )
+            gpus.append(gpu)
+        
+        node_info = NodeInfo(
+            name=name,
+            gpu_type=gpu_info['gpu_type'],
+            gpus=gpus
+        )
+        
+        # 추가 정보 포함
+        node_dict = node_info.dict()
+        node_dict['gpu_count'] = gpu_info['gpu_count']
+        node_dict['status'] = gpu_info['status']
+        
+        if 'error' in gpu_info:
+            node_dict['error'] = gpu_info['error']
+        
+        result.append(node_dict)
+    
+    return {"nodes": result}
 
 @router.get("/{node_name}/gpus/", response_model=dict)
 def get_node_gpus(node_name: str):
@@ -75,6 +109,9 @@ def get_node_gpus(node_name: str):
     
     **반환 데이터:**
     - `node`: 노드 이름
+    - `gpu_type`: GPU 타입
+    - `gpu_count`: GPU 개수
+    - `status`: 노드 상태
     - `gpus`: GPU 정보 목록
     
     **예시:**
@@ -85,15 +122,30 @@ def get_node_gpus(node_name: str):
         raise HTTPException(400, "Invalid node name pattern. Expected: violet-그래픽카드이름-001~0xx")
     
     k8s = K8SClient(KUBECONFIG)
-    nodes = k8s.list_nodes().items
-    node = next((n for n in nodes if n.metadata.name == node_name), None)
-    if not node:
-        raise HTTPException(404, "Node not found")
-    gpu_type = GPUParser.parse_node_name(node_name)
-    ann = node.metadata.annotations or {}
-    vgpu_info = GPUParser.parse_vgpu_devices_allocated(ann.get('hami.io/vgpu-devices-allocated', ''))
-    gpus = [GPUInfo(uuid=g['uuid'], nvidia=gpu_type, unique_id=g['uuid'], allocation=g['allocation']) for g in vgpu_info]
-    return {"node": node_name, "gpus": [g.dict() for g in gpus]}
+    gpu_info = k8s.get_node_gpu_info(node_name)
+    
+    if gpu_info['status'] == 'Error':
+        raise HTTPException(404, f"Node not found or error: {gpu_info.get('error', 'Unknown error')}")
+    
+    # GPU 상세 정보를 GPUInfo 모델로 변환
+    gpus = []
+    for gpu_detail in gpu_info['gpu_details']:
+        gpu = GPUInfo(
+            uuid=gpu_detail['uuid'],
+            nvidia=gpu_info['gpu_type'],
+            unique_id=gpu_detail['uuid'],
+            allocation=gpu_detail['allocation'],
+            source=gpu_detail['source']
+        )
+        gpus.append(gpu)
+    
+    return {
+        "node": node_name,
+        "gpu_type": gpu_info['gpu_type'],
+        "gpu_count": gpu_info['gpu_count'],
+        "status": gpu_info['status'],
+        "gpus": [g.dict() for g in gpus]
+    }
 
 @router.get("/{node_name}/gpus/{gpu_uuid}/pods/", response_model=dict)
 def get_gpu_pods(node_name: str, gpu_uuid: str):

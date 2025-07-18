@@ -27,6 +27,111 @@ class K8SClient:
         """모든 Job 목록 조회"""
         return self.batch_v1.list_job_for_all_namespaces()
 
+    def get_node_gpu_info(self, node_name: str) -> Dict:
+        """노드의 GPU 정보를 종합적으로 조회 (hami.io annotation + 노드 상태)"""
+        try:
+            # 노드 정보 조회
+            node = self.core_v1.read_node(name=node_name)
+            
+            # 기본 GPU 정보 초기화
+            gpu_info = {
+                'node_name': node_name,
+                'gpu_count': 0,
+                'gpu_details': [],
+                'status': 'Unknown'
+            }
+            
+            # 1. hami.io annotation에서 GPU 정보 파싱
+            annotations = node.metadata.annotations or {}
+            vgpu_allocated = annotations.get('hami.io/vgpu-devices-allocated', '')
+            
+            if vgpu_allocated:
+                # hami.io annotation이 있으면 파싱
+                gpu_details = []
+                for item in vgpu_allocated.split(','):
+                    if ':' in item:
+                        uuid, alloc = item.split(':', 1)
+                        try:
+                            gpu_details.append({
+                                'uuid': uuid.strip(),
+                                'allocation': int(alloc.strip()),
+                                'source': 'hami.io'
+                            })
+                        except ValueError:
+                            continue
+                
+                gpu_info['gpu_count'] = len(gpu_details)
+                gpu_info['gpu_details'] = gpu_details
+                gpu_info['status'] = 'Active'
+            
+            # 2. 노드 상태에서 GPU 정보 확인 (hami.io가 없을 경우)
+            if gpu_info['gpu_count'] == 0:
+                # 노드의 allocatable 리소스에서 GPU 확인
+                allocatable = node.status.allocatable or {}
+                
+                # nvidia.com/gpu 리소스 확인
+                nvidia_gpu = allocatable.get('nvidia.com/gpu', '0')
+                if nvidia_gpu and nvidia_gpu != '0':
+                    try:
+                        gpu_count = int(nvidia_gpu)
+                        gpu_info['gpu_count'] = gpu_count
+                        gpu_info['status'] = 'Available'
+                        
+                        # 기본 GPU 상세 정보 생성
+                        for i in range(gpu_count):
+                            gpu_info['gpu_details'].append({
+                                'uuid': f'GPU-{node_name}-{i:03d}',
+                                'allocation': 0,
+                                'source': 'node_status'
+                            })
+                    except ValueError:
+                        pass
+                
+                # example.com/gpu 또는 다른 GPU 리소스 확인
+                custom_gpu = allocatable.get(f'{GPU_RESOURCE_PREFIX}/gpu', '0')
+                if custom_gpu and custom_gpu != '0' and gpu_info['gpu_count'] == 0:
+                    try:
+                        gpu_count = int(custom_gpu)
+                        gpu_info['gpu_count'] = gpu_count
+                        gpu_info['status'] = 'Available'
+                        
+                        # 기본 GPU 상세 정보 생성
+                        for i in range(gpu_count):
+                            gpu_info['gpu_details'].append({
+                                'uuid': f'GPU-{node_name}-{i:03d}',
+                                'allocation': 0,
+                                'source': 'node_status'
+                            })
+                    except ValueError:
+                        pass
+            
+            # 3. 노드 라벨에서 GPU 타입 확인
+            labels = node.metadata.labels or {}
+            gpu_type = labels.get('nvidia.com/gpu.product', 'Unknown')
+            if gpu_type == 'Unknown':
+                # 노드 이름에서 GPU 타입 추출 시도
+                if 'h100' in node_name.lower():
+                    gpu_type = 'H100'
+                elif 'a100' in node_name.lower():
+                    gpu_type = 'A100'
+                elif 'rtx' in node_name.lower():
+                    gpu_type = 'RTX'
+            
+            gpu_info['gpu_type'] = gpu_type
+            
+            return gpu_info
+            
+        except Exception as e:
+            print(f"Error getting GPU info for node {node_name}: {e}")
+            return {
+                'node_name': node_name,
+                'gpu_count': 0,
+                'gpu_details': [],
+                'status': 'Error',
+                'gpu_type': 'Unknown',
+                'error': str(e)
+            }
+
     def list_workloads(self) -> List[Dict]:
         """Kueue Workloads 조회 (pending 상태의 Workload만)"""
         try:
