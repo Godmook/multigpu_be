@@ -19,18 +19,26 @@ class GPUParser:
         return bool(re.match(pattern, node_name))
 
     @staticmethod
-    def parse_vgpu_devices_allocated(annotation: str) -> List[Dict]:
-        """hami.io/vgpu-devices-allocated에서 GPU 할당 정보 파싱 (예: 'UUID1:80,UUID2:20')"""
+    def parse_vgpu_devices_allocated(annotation: str, physical_gpu_count: int) -> List[Dict]:
+        """
+        hami.io/vgpu-devices-allocated에서 GPU UUID, 할당률만 추출
+        예: GPU-UUID,NVIDIA,143771,100:GPU-UUID2,NVIDIA,143771,100
+        → [{uuid, allocation}, ...] (부족하면 빈 UUID/0으로 채움)
+        """
         result = []
-        if not annotation:
-            return result
-        for item in annotation.split(','):
-            if ':' in item:
-                uuid, alloc = item.split(':', 1)
-                try:
-                    result.append({"uuid": uuid, "allocation": int(alloc)})
-                except Exception:
-                    continue
+        if annotation:
+            for item in annotation.split(':'):
+                parts = item.split(',')
+                if len(parts) >= 4:
+                    uuid = parts[0]
+                    try:
+                        allocation = int(parts[3])
+                    except Exception:
+                        allocation = 0
+                    result.append({"uuid": uuid, "allocation": allocation})
+        # 부족하면 빈 UUID/0으로 채움
+        while len(result) < physical_gpu_count:
+            result.append({"uuid": "", "allocation": 0})
         return result
 
     @staticmethod
