@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple, DefaultDict
 from collections import defaultdict
+import random
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -106,16 +107,16 @@ def _segments_from_alloc_map(seg_alloc: DefaultDict[Tuple[str, str], int], total
     segments: List[SegmentInfo] = []
     if total == 0:
         return segments
-    for (member, team), alloc,util in seg_alloc.items():
+    for (member, team), alloc in seg_alloc.items():
+        utilization = random.randint(0, 100)
         segments.append(
             SegmentInfo(
                 user_name=member,
                 team_name=team,
                 allocation=alloc,
-                utilization=util,
+                utilization=utilization,
             )
         )
-    # Sort big‑to‑small so the frontend can colour‑stack nicely.
     segments.sort(key=lambda s: s.allocation, reverse=True)
     return segments
 
