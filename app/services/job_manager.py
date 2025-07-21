@@ -235,9 +235,14 @@ class JobManager:
     def get_pending_workloads(self) -> dict:
         """
         Kueue에서 pending 상태의 Workload 목록을 priority 내림차순, queue name별로 그룹핑해서 반환
-        user_name, team_name, gpu_type은 podSets[0].template.metadata.annotations에서 추출
+        admit이 되었지만 실제 Running Pod가 없는 경우 여전히 pending으로 간주
+        segment의 utilization은 0~100 랜덤값으로 채움
         """
         workloads_data = self.k8s.list_workloads()
+        # 1. 모든 Running Pod 이름 집계
+        running_pod_names = set()
+        for pod in self.k8s.list_gpu_job_pods().items:
+            running_pod_names.add(pod.metadata.name)
         grouped = {}
         for wl_data in workloads_data:
             labels = wl_data.get('labels', {})
@@ -246,6 +251,28 @@ class JobManager:
             user_name = pod_ann.get('example.com/member', '')
             team_name = pod_ann.get('example.com/team', '')
             gpu_type = pod_ann.get('nvidia.com/use-gputype', '')
+            job_name = wl_data['name']
+            # admit이 되었지만 실제 Running Pod가 없으면 여전히 pending으로 간주
+            has_running_pod = any(job_name in pod_name for pod_name in running_pod_names)
+            # 만약 admit이 되었고, Running Pod가 있으면 skip (pending에서 제외)
+            if wl_data.get('status', '') == 'admit' and has_running_pod:
+                continue
+            # segment의 utilization은 랜덤값
+            allocation = wl_data['resource_requests'].get('example.com/gpu', 0)
+            try:
+                allocation = int(allocation)
+            except Exception:
+                allocation = 0
+            utilization = random.randint(0, 100) if allocation else 0
+            # segments 필드 추가 (테스트용, 실제는 여러 멤버/팀 조합 가능)
+            segments = [
+                {
+                    "user_name": user_name,
+                    "team_name": team_name,
+                    "allocation": allocation,
+                    "utilization": utilization,
+                }
+            ]
             workload = WorkloadInfo(
                 name=wl_data['name'],
                 namespace=wl_data['namespace'],
@@ -258,11 +285,13 @@ class JobManager:
                 team_name=team_name,
                 gpu_type=gpu_type
             )
+            wdict = workload.dict()
+            wdict['segments'] = segments
             if queue_name not in grouped:
                 grouped[queue_name] = []
-            grouped[queue_name].append(workload)
+            grouped[queue_name].append(wdict)
         for queue in grouped:
-            grouped[queue].sort(key=lambda w: w.priority, reverse=True)
+            grouped[queue].sort(key=lambda w: w['priority'], reverse=True)
         return grouped
 
     def update_priority(self, job_id: str, priority: str) -> bool:

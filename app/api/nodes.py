@@ -41,6 +41,7 @@ class SegmentInfo(BaseModel):
     user_name: str = Field(..., description="member annotation, may be empty")
     team_name: str = Field(..., description="team annotation, may be empty")
     allocation: int = Field(..., ge=0, le=100, description="Raw allocation value")
+    utilization: int = Field(..., ge=0, le=100, description="Raw utilization value")
 
 # ---------------------------------------------------------------------------
 # Constants & router
@@ -105,12 +106,13 @@ def _segments_from_alloc_map(seg_alloc: DefaultDict[Tuple[str, str], int], total
     segments: List[SegmentInfo] = []
     if total == 0:
         return segments
-    for (member, team), alloc in seg_alloc.items():
+    for (member, team), alloc,util in seg_alloc.items():
         segments.append(
             SegmentInfo(
                 user_name=member,
                 team_name=team,
                 allocation=alloc,
+                utilization=util,
             )
         )
     # Sort big‑to‑small so the frontend can colour‑stack nicely.
