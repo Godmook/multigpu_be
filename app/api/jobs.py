@@ -51,7 +51,7 @@ def get_pending_workloads():
     jm = JobManager()
     grouped = jm.get_pending_workloads()
     # queue별로 priority 내림차순 리스트 반환
-    return {"pending_workloads": {q: [w.dict() for w in ws] for q, ws in grouped.items()}}
+    return {"pending_workloads": grouped}
 
 @router.patch("/{job_id}/priority/", response_model=dict)
 def update_job_priority(job_id: str, priority: str):
