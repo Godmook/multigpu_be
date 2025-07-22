@@ -84,7 +84,7 @@ def _aggregate_gpu_usage(pods) -> Dict[str, Dict]:
                     "pods": [],
                     "user_names": set(),
                     "team_names": set(),
-                    "segment_alloc": defaultdict(lambda: [0, 0]),  # key -> [allocation, utilization]
+                    "segment_alloc": defaultdict(list),  # key -> [allocation, utilization]
                 }
 
             info = uuid_to_info[uuid]
@@ -98,6 +98,7 @@ def _aggregate_gpu_usage(pods) -> Dict[str, Dict]:
 
             seg_key = (member, team)
             info["segment_alloc"][seg_key].append((g["allocation"], int(utilization or 0)))
+
 
     return uuid_to_info
 
