@@ -50,6 +50,7 @@ class SegmentInfo(BaseModel):
 
 TEAM_ANNOT_KEY = "example.com/team"
 MEMBER_ANNOT_KEY = "example.com/member"
+UTIL_ANNOT_KEY="example.com/utilization"
 GPU_SLOTS = 8  # maximum number of vGPU partitions per physical GPU
 
 router = APIRouter()
@@ -70,20 +71,20 @@ def _aggregate_gpu_usage(pods) -> Dict[str, Dict]:
         )
         team = ann.get(TEAM_ANNOT_KEY, "")
         member = ann.get(MEMBER_ANNOT_KEY, "")
+        utilization = ann.get(UTIL_ANNOT_KEY, "")
 
         for g in vgpu_info:
             uuid = g["uuid"] or ""
             if not uuid:
-                continue  # skip malformed entries
+                continue
 
-            # Initialise container for this UUID.
             if uuid not in uuid_to_info:
                 uuid_to_info[uuid] = {
                     "allocation_total": 0,
                     "pods": [],
                     "user_names": set(),
                     "team_names": set(),
-                    "segment_alloc": defaultdict(int),  # key -> allocation
+                    "segment_alloc": defaultdict(lambda: [0, 0]),  # key -> [allocation, utilization]
                 }
 
             info = uuid_to_info[uuid]
@@ -95,20 +96,20 @@ def _aggregate_gpu_usage(pods) -> Dict[str, Dict]:
             if team:
                 info["team_names"].add(team)
 
-            # Aggregate allocation per (user, team) pair.
             seg_key = (member, team)
-            info["segment_alloc"][seg_key] += g["allocation"]
+            info["segment_alloc"][seg_key][0] += g["allocation"]
+            info["segment_alloc"][seg_key][1] += int(utilization or 0)
 
     return uuid_to_info
 
 
-def _segments_from_alloc_map(seg_alloc: DefaultDict[Tuple[str, str], int], total: int) -> List[SegmentInfo]:
+
+def _segments_from_alloc_map(seg_alloc: DefaultDict[Tuple[str, str], Tuple[int, int]], total: int) -> List[SegmentInfo]:
     """Convert aggregated allocation map to a sorted list of SegmentInfo."""
     segments: List[SegmentInfo] = []
     if total == 0:
         return segments
-    for (member, team), alloc in seg_alloc.items():
-        utilization = random.randint(0, 100)
+    for (member, team), (alloc, utilization) in seg_alloc.items():
         segments.append(
             SegmentInfo(
                 user_name=member,
