@@ -97,29 +97,30 @@ def _aggregate_gpu_usage(pods) -> Dict[str, Dict]:
                 info["team_names"].add(team)
 
             seg_key = (member, team)
-            info["segment_alloc"][seg_key][0] += g["allocation"]
-            info["segment_alloc"][seg_key][1] += int(utilization or 0)
+            info["segment_alloc"][seg_key].append((g["allocation"], int(utilization or 0)))
 
     return uuid_to_info
 
 
 
-def _segments_from_alloc_map(seg_alloc: DefaultDict[Tuple[str, str], Tuple[int, int]], total: int) -> List[SegmentInfo]:
-    """Convert aggregated allocation map to a sorted list of SegmentInfo."""
+def _segments_from_alloc_map(seg_alloc: DefaultDict[Tuple[str, str], List[Tuple[int, int]]], total: int) -> List[SegmentInfo]:
     segments: List[SegmentInfo] = []
     if total == 0:
         return segments
-    for (member, team), (alloc, utilization) in seg_alloc.items():
-        segments.append(
-            SegmentInfo(
-                user_name=member,
-                team_name=team,
-                allocation=alloc,
-                utilization=utilization,
+
+    for (member, team), alloc_util_list in seg_alloc.items():
+        for alloc, utilization in alloc_util_list:
+            segments.append(
+                SegmentInfo(
+                    user_name=member,
+                    team_name=team,
+                    allocation=alloc,
+                    utilization=utilization,  # 여기서 각각의 값이 들어감
+                )
             )
-        )
     segments.sort(key=lambda s: s.allocation, reverse=True)
     return segments
+
 
 # ---------------------------------------------------------------------------
 # Routes
